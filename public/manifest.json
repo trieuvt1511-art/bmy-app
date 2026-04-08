@@ -1,0 +1,32 @@
+{
+  "name": "YumGo — Global Cooking",
+  "short_name": "YumGo",
+  "description": "Discover global recipes, ingredients and food trends — from Hanoi pho to Madrid tapas.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fffbf8",
+  "theme_color": "#FF5722",
+  "categories": ["food", "lifestyle", "education"],
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
