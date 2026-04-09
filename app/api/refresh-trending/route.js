@@ -233,10 +233,13 @@ QUY TẮC BẮT BUỘC:
 TƯ LIỆU GỐC:
 ${rawContent}`;
 
-  const maxAttempts = 2;
-  const retry = async (stage, detail) => {
+  const maxAttempts = 3;
+  const retry = async (stage, detail, is429 = false) => {
     if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      // Nếu bị 429 (rate limit) chờ lâu hơn (15s, 30s)
+      // Nếu lỗi khác chỉ backoff nhẹ (2s, 4s)
+      const waitMs = is429 ? 15000 * attempt : 2000 * attempt;
+      await new Promise((r) => setTimeout(r, waitMs));
       return groqRewriteOne(item, attempt + 1);
     }
     return { ok: false, stage, detail, attempts: attempt };
@@ -263,7 +266,7 @@ ${rawContent}`;
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return retry("http", `${res.status} ${body.slice(0, 180)}`);
+      return retry("http", `${res.status} ${body.slice(0, 180)}`, res.status === 429);
     }
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content || "{}";
@@ -364,9 +367,9 @@ async function run({ dry = false } = {}) {
   const toRewrite = raw.slice(0, MAX_TRENDING_ITEMS);
 
   // 3. Rewrite each item into a full Vietnamese article via Groq.
-  //    Concurrency=3 để không bị rate-limit nhưng vẫn nhanh.
-  // Concurrency 5 giữ tổng thời gian < 45s cho 12 bài, không vượt Groq rate limit.
-  const rewrites = await rewriteAll(toRewrite, 5);
+  //    Concurrency=2 + retry-on-429 để không vượt free-tier 12k TPM.
+  //    Mỗi request dùng ~3.4k token → 2 concurrent = ~7k peak, an toàn.
+  const rewrites = await rewriteAll(toRewrite, 2);
 
   // 4. Merge — nếu Groq rewrite fail thì fallback về title gốc + excerpt thô.
   let engine = "raw";

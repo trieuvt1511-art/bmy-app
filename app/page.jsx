@@ -156,26 +156,54 @@ export default function HomePage() {
         <p className="text-brand-900/60 mt-1 mb-6">{t("home.categoriesDesc")}</p>
 
         <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 -mx-1 px-1">
-          {categories.map((cat) => (
-            <Link
-              key={cat.idCategory}
-              href={`/recipes?category=${encodeURIComponent(cat.strCategory)}`}
-              className="flex-shrink-0 w-40 bg-white border border-brand-100 rounded-3xl p-3 card-hover"
-            >
-              <div className="aspect-square rounded-2xl bg-brand-50 overflow-hidden mb-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={cat.strCategoryThumb}
-                  alt={cat.strCategory}
-                  loading="lazy"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="font-bold text-brand-900 text-sm">
-                {translations[`cat_${cat.idCategory}`] || cat.strCategory}
-              </div>
-            </Link>
-          ))}
+          {categories.map((cat, idx) => {
+            const gradients = [
+              "from-rose-400 to-orange-400",
+              "from-amber-400 to-pink-500",
+              "from-emerald-400 to-teal-500",
+              "from-sky-400 to-indigo-500",
+              "from-fuchsia-400 to-purple-500",
+              "from-lime-400 to-emerald-500",
+              "from-orange-400 to-red-500",
+              "from-cyan-400 to-blue-500",
+              "from-yellow-400 to-orange-500",
+              "from-pink-400 to-rose-500",
+            ];
+            const hasRemoteThumb =
+              typeof cat.strCategoryThumb === "string" &&
+              cat.strCategoryThumb.startsWith("http");
+            const label =
+              translations[`cat_${cat.idCategory}`] || cat.strCategory;
+            const initial = String(label || "?").charAt(0).toUpperCase();
+            return (
+              <Link
+                key={cat.idCategory}
+                href={`/recipes?category=${encodeURIComponent(cat.strCategory)}`}
+                className="flex-shrink-0 w-40 bg-white border border-brand-100 rounded-3xl p-3 card-hover"
+              >
+                <div className="aspect-square rounded-2xl overflow-hidden mb-2 bg-brand-50">
+                  {hasRemoteThumb ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={cat.strCategoryThumb}
+                      alt={cat.strCategory}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className={`w-full h-full bg-gradient-to-br ${gradients[idx % gradients.length]} flex items-center justify-center`}
+                    >
+                      <span className="font-display font-black text-white text-6xl drop-shadow-md">
+                        {initial}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="font-bold text-brand-900 text-sm">{label}</div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
