@@ -37,7 +37,9 @@ export const maxDuration = 60;
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+// llama-3.1-8b-instant: TPM ~30k (>2.5× so với 70b), output ~3× nhanh hơn.
+// Chất lượng tiếng Việt vẫn đủ cho summary ẩm thực ~150 từ.
+const GROQ_MODEL = "llama-3.1-8b-instant";
 
 // ---------------------------------------------------------------------------
 // RSS parsing — tiny hand-rolled parser, no external deps
