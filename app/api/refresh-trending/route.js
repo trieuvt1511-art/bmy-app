@@ -148,9 +148,24 @@ async function fetchFeed(source) {
       sourceLang: source.lang,
     }));
     if (items.length === 0) {
+      // Debug: return tag histogram + first item-like snippet so we can see
+      // why parsing failed for this feed.
+      const tagCounts = {};
+      const tagRe = /<([a-zA-Z][a-zA-Z0-9:]*)[\s>]/g;
+      let m;
+      while ((m = tagRe.exec(xml)) !== null) {
+        const t = m[1].toLowerCase();
+        tagCounts[t] = (tagCounts[t] || 0) + 1;
+        if (Object.keys(tagCounts).length > 80) break;
+      }
+      const topTags = Object.entries(tagCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([t, c]) => `${t}:${c}`)
+        .join(",");
       return {
         source: source.id,
-        error: `parsed 0 items (xml ${xml.length} bytes)`,
+        error: `parsed 0 items (xml ${xml.length} bytes) tags=[${topTags}] head=${xml.slice(0, 200).replace(/\s+/g, " ")}`,
         items: [],
       };
     }
