@@ -28,7 +28,12 @@ import {
   ITEMS_PER_SOURCE,
   MAX_TRENDING_ITEMS,
 } from "@/lib/trendingSources";
-import { saveTrending } from "@/lib/trendingStore";
+import { saveTrending, getTrending } from "@/lib/trendingStore";
+
+// Incremental rewrite cap: mỗi lần cron chỉ rewrite bấy nhiêu item MỚI.
+// Groq free tier 8b-instant TPM ~6000, mỗi rewrite ~2500 token → 2 calls/run an toàn.
+// Sau ~4-6h cron chạy định kỳ sẽ tích đủ MAX_TRENDING_ITEMS item cache.
+const MAX_REWRITES_PER_RUN = 2;
 
 // Node runtime — we need full fetch + TextDecoder for RSS parsing.
 export const runtime = "nodejs";
@@ -199,14 +204,15 @@ function sanitizeForPrompt(s = "") {
 async function groqRewriteOne(item, attempt = 1) {
   if (!GROQ_API_KEY) return { ok: false, stage: "no-key" };
 
-  // Ghép title + description + content để Groq có nhiều ngữ cảnh nhất có thể
+  // Ghép title + description + content. Giới hạn chặt để tiết kiệm TPM
+  // (free tier 8b-instant chỉ 6000 TPM).
   const rawContent = [
     `NGÔN NGỮ NGUỒN: ${item.sourceLang}`,
     `NGUỒN: ${item.sourceName}`,
     `TIÊU ĐỀ GỐC: ${sanitizeForPrompt(item.title)}`,
-    `MÔ TẢ: ${sanitizeForPrompt((item.description || "").slice(0, 1500))}`,
+    `MÔ TẢ: ${sanitizeForPrompt((item.description || "").slice(0, 500))}`,
     item.content && item.content !== item.description
-      ? `NỘI DUNG: ${sanitizeForPrompt(item.content.slice(0, 2500))}`
+      ? `NỘI DUNG: ${sanitizeForPrompt(item.content.slice(0, 800))}`
       : "",
   ]
     .filter(Boolean)
@@ -257,7 +263,7 @@ ${rawContent}`;
       body: JSON.stringify({
         model: GROQ_MODEL,
         temperature: 0.6,
-        max_tokens: 1400,
+        max_tokens: 900,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: JOURNALIST_SYSTEM_PROMPT },
@@ -345,6 +351,12 @@ function authOk(req) {
 }
 
 async function run({ dry = false } = {}) {
+  // 0. Load existing cache — dùng làm base + skip item đã rewrite trước đó.
+  const existing = await getTrending();
+  const existingByUrl = new Map(
+    existing.map((it) => [it.sourceUrl || it.url || "", it])
+  );
+
   // 1. Fetch all feeds in parallel
   const feedResults = await Promise.all(TRENDING_SOURCES.map(fetchFeed));
 
@@ -355,28 +367,29 @@ async function run({ dry = false } = {}) {
     raw.push(...fr.items);
   }
 
-  if (raw.length === 0) {
+  if (raw.length === 0 && existing.length === 0) {
     return { ok: false, reason: "all feeds empty", errors };
   }
 
-  // 2. Sort by publishedAt desc and cap BEFORE rewriting — chỉ viết lại
-  // các bài mới nhất để tiết kiệm token và thời gian.
+  // 2. Sort by publishedAt desc
   raw.sort((a, b) => {
     const da = Date.parse(a.pubDate) || 0;
     const db = Date.parse(b.pubDate) || 0;
     return db - da;
   });
-  const toRewrite = raw.slice(0, MAX_TRENDING_ITEMS);
 
-  // 3. Rewrite each item into a full Vietnamese article via Groq.
-  //    Concurrency=2 + retry-on-429 để không vượt free-tier 12k TPM.
-  //    Mỗi request dùng ~3.4k token → 2 concurrent = ~7k peak, an toàn.
-  const rewrites = await rewriteAll(toRewrite, 2);
+  // 3. Lọc ra các item CHƯA có trong cache (by link) — chỉ rewrite new items.
+  //    Cap ở MAX_REWRITES_PER_RUN để không vượt TPM 6000 free tier.
+  const freshRaw = raw.filter((r) => !existingByUrl.has(r.link));
+  const toRewrite = freshRaw.slice(0, MAX_REWRITES_PER_RUN);
 
-  // 4. Merge — nếu Groq rewrite fail thì fallback về title gốc + excerpt thô.
-  let engine = "raw";
+  // 4. Rewrite sequential (concurrency=1) — an toàn tuyệt đối với TPM.
+  const rewrites = await rewriteAll(toRewrite, 1);
+
+  // 5. Build new article objects.
+  let engine = existing.length > 0 ? "groq" : "raw";
   const rewriteErrors = [];
-  const articles = toRewrite.map((src, i) => {
+  const newArticles = toRewrite.map((src, i) => {
     const rw = rewrites[i];
     const id = `${src.source}-${Buffer.from(src.link)
       .toString("base64url")
@@ -405,32 +418,50 @@ async function run({ dry = false } = {}) {
       bodyVi: ok ? rw.bodyVi : "",
       excerptVi: ok ? rw.leadVi : (src.description || "").slice(0, 180),
       tags: ok ? rw.tags : [],
-      image: baseImage, // URL gốc (để debug / fallback)
-      imageProxy: proxyImageUrl(baseImage), // URL qua proxy của mình
+      image: baseImage,
+      imageProxy: proxyImageUrl(baseImage),
       publishedAt: src.pubDate || "",
       fetchedAt: new Date().toISOString(),
       isRewritten: !!ok,
     };
   });
 
-  // 5. Save (unless dry run) — chỉ save những bài đã rewrite thành công
-  // để Blog không bị lẫn bài tiếng Anh chưa biên tập.
-  const publishable = articles.filter((a) => a.isRewritten);
+  // 6. Merge với cache cũ: new publishable items + existing items,
+  //    dedupe by sourceUrl, sort by publishedAt desc, cap MAX_TRENDING_ITEMS.
+  const newPublishable = newArticles.filter((a) => a.isRewritten);
+  const mergedMap = new Map();
+  for (const it of newPublishable) mergedMap.set(it.sourceUrl, it);
+  for (const it of existing) {
+    const url = it.sourceUrl || it.url || "";
+    if (url && !mergedMap.has(url)) mergedMap.set(url, it);
+  }
+  const merged = [...mergedMap.values()]
+    .sort((a, b) => {
+      const da = Date.parse(a.publishedAt || a.fetchedAt) || 0;
+      const db = Date.parse(b.publishedAt || b.fetchedAt) || 0;
+      return db - da;
+    })
+    .slice(0, MAX_TRENDING_ITEMS);
+
+  // 7. Save merged cache (unless dry run)
   let saved = null;
   if (!dry) {
-    saved = await saveTrending(publishable);
+    saved = await saveTrending(merged);
   }
 
   return {
     ok: true,
     engine,
-    count: articles.length,
-    publishedCount: publishable.length,
-    rewrittenCount: articles.filter((a) => a.isRewritten).length,
-    refreshedAt: saved?.refreshedAt || null,
-    errors,
+    // Report new activity this run
+    attempted: toRewrite.length,
+    newlyRewritten: newPublishable.length,
+    // Report total cache state after merge
+    cachedTotal: merged.length,
     rewriteErrors,
-    items: articles,
+    errors,
+    refreshedAt: saved?.refreshedAt || null,
+    existingCount: existing.length,
+    freshAvailable: freshRaw.length,
   };
 }
 
