@@ -102,8 +102,15 @@ export default function BlogPage() {
                     <img
                       src={img}
                       alt={t.titleVi || t.originalTitle || t.title}
-                      className="w-full aspect-[16/9] object-cover"
-                      loading="lazy"
+                      className="w-full aspect-[16/9] object-cover bg-brand-50"
+                      loading="eager"
+                      decoding="async"
+                      onError={(e) => {
+                        // Nếu proxy fail, fallback qua raw external image
+                        if (t.image && e.currentTarget.src !== t.image) {
+                          e.currentTarget.src = t.image;
+                        }
+                      }}
                     />
                   ) : (
                     <div className="w-full aspect-[16/9] bg-gradient-to-br from-brand-100 to-brand-200" />
