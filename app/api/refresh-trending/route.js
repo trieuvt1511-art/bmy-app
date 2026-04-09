@@ -181,17 +181,30 @@ async function fetchFeed(source) {
 
 const JOURNALIST_SYSTEM_PROMPT = `Bạn là phóng viên ẩm thực cao cấp của B'My Kitchen – một thương hiệu Bánh Mì và Cà Phê Việt Nam tại Madrid. Bạn viết tiếng Việt tự nhiên, có chiều sâu, có quan điểm, giống như biên tập viên của Esquire hoặc Luxuo Việt Nam. Bạn KHÔNG dịch máy. Bạn ĐỌC nguồn, NẮM ý chính, rồi VIẾT LẠI HOÀN TOÀN bằng giọng văn của mình, có thêm góc nhìn và liên hệ với ẩm thực Việt khi phù hợp. Luôn trả về JSON hợp lệ.`;
 
-async function groqRewriteOne(item) {
-  if (!GROQ_API_KEY) return null;
+// Sanitize input để tránh các ký tự bẻ gãy prompt / JSON của Groq.
+// Thay smart-quotes → ASCII, bỏ zero-width & control chars.
+function sanitizeForPrompt(s = "") {
+  return String(s)
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    // Strip ASCII control chars (keep \n\r\t)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim();
+}
+
+async function groqRewriteOne(item, attempt = 1) {
+  if (!GROQ_API_KEY) return { ok: false, stage: "no-key" };
 
   // Ghép title + description + content để Groq có nhiều ngữ cảnh nhất có thể
   const rawContent = [
     `NGÔN NGỮ NGUỒN: ${item.sourceLang}`,
     `NGUỒN: ${item.sourceName}`,
-    `TIÊU ĐỀ GỐC: ${item.title}`,
-    `MÔ TẢ: ${(item.description || "").slice(0, 1500)}`,
+    `TIÊU ĐỀ GỐC: ${sanitizeForPrompt(item.title)}`,
+    `MÔ TẢ: ${sanitizeForPrompt((item.description || "").slice(0, 1500))}`,
     item.content && item.content !== item.description
-      ? `NỘI DUNG: ${item.content.slice(0, 2500)}`
+      ? `NỘI DUNG: ${sanitizeForPrompt(item.content.slice(0, 2500))}`
       : "",
   ]
     .filter(Boolean)
@@ -207,6 +220,7 @@ QUY TẮC BẮT BUỘC:
 5. Tags: 2-4 tag ngắn bằng tiếng Việt, ví dụ "Bánh mì", "Xu hướng", "Công thức", "Cà phê", "Văn hoá".
 6. Nếu nguồn viết về kỹ thuật nấu, hãy giải thích bằng ngôn ngữ dễ hiểu cho độc giả gia đình.
 7. Không mở đầu bằng "Theo tạp chí X…" hoặc "Bài viết nói rằng…". Viết như thể bạn tự khám phá ra câu chuyện này.
+8. Nếu tư liệu gốc quá ngắn (chỉ có tiêu đề), hãy DỰA VÀO chủ đề để viết ra một bài phân tích / bối cảnh văn hoá ẩm thực liên quan, vẫn đủ 400-600 chữ.
 
 ĐỊNH DẠNG OUTPUT (JSON duy nhất, không thêm text):
 {
@@ -218,6 +232,15 @@ QUY TẮC BẮT BUỘC:
 
 TƯ LIỆU GỐC:
 ${rawContent}`;
+
+  const maxAttempts = 2;
+  const retry = async (stage, detail) => {
+    if (attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      return groqRewriteOne(item, attempt + 1);
+    }
+    return { ok: false, stage, detail, attempts: attempt };
+  };
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -238,19 +261,33 @@ ${rawContent}`;
       }),
       signal: AbortSignal.timeout(45000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return retry("http", `${res.status} ${body.slice(0, 180)}`);
+    }
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    if (!parsed.titleVi || !parsed.bodyVi) return null;
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      return retry("parse", content.slice(0, 200));
+    }
+    if (!parsed.titleVi || !parsed.bodyVi) {
+      return retry(
+        "validate",
+        `keys=${Object.keys(parsed).join(",")} titleVi=${!!parsed.titleVi} bodyVi=${!!parsed.bodyVi}`
+      );
+    }
     return {
+      ok: true,
       titleVi: String(parsed.titleVi).trim(),
       leadVi: String(parsed.leadVi || "").trim(),
       bodyVi: String(parsed.bodyVi).trim(),
       tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 4) : [],
     };
-  } catch {
-    return null;
+  } catch (err) {
+    return retry("exception", String(err?.message || err));
   }
 }
 
@@ -333,45 +370,61 @@ async function run({ dry = false } = {}) {
 
   // 4. Merge — nếu Groq rewrite fail thì fallback về title gốc + excerpt thô.
   let engine = "raw";
+  const rewriteErrors = [];
   const articles = toRewrite.map((src, i) => {
     const rw = rewrites[i];
     const id = `${src.source}-${Buffer.from(src.link)
       .toString("base64url")
       .slice(0, 16)}`;
     const baseImage = src.image || "";
-    if (rw) engine = "groq";
+    const ok = rw && rw.ok;
+    if (ok) engine = "groq";
+    if (rw && !rw.ok) {
+      rewriteErrors.push({
+        i,
+        source: src.source,
+        title: src.title.slice(0, 60),
+        stage: rw.stage,
+        detail: typeof rw.detail === "string" ? rw.detail.slice(0, 200) : rw.detail,
+        attempts: rw.attempts,
+      });
+    }
     return {
       id,
       source: src.source,
       sourceName: src.sourceName,
       sourceUrl: src.link,
       originalTitle: src.title,
-      titleVi: rw?.titleVi || src.title,
-      leadVi: rw?.leadVi || (src.description || "").slice(0, 240),
-      bodyVi: rw?.bodyVi || "",
-      excerptVi: rw?.leadVi || (src.description || "").slice(0, 180),
-      tags: rw?.tags || [],
+      titleVi: ok ? rw.titleVi : src.title,
+      leadVi: ok ? rw.leadVi : (src.description || "").slice(0, 240),
+      bodyVi: ok ? rw.bodyVi : "",
+      excerptVi: ok ? rw.leadVi : (src.description || "").slice(0, 180),
+      tags: ok ? rw.tags : [],
       image: baseImage, // URL gốc (để debug / fallback)
       imageProxy: proxyImageUrl(baseImage), // URL qua proxy của mình
       publishedAt: src.pubDate || "",
       fetchedAt: new Date().toISOString(),
-      isRewritten: !!rw,
+      isRewritten: !!ok,
     };
   });
 
-  // 5. Save (unless dry run)
+  // 5. Save (unless dry run) — chỉ save những bài đã rewrite thành công
+  // để Blog không bị lẫn bài tiếng Anh chưa biên tập.
+  const publishable = articles.filter((a) => a.isRewritten);
   let saved = null;
   if (!dry) {
-    saved = await saveTrending(articles);
+    saved = await saveTrending(publishable);
   }
 
   return {
     ok: true,
     engine,
     count: articles.length,
+    publishedCount: publishable.length,
     rewrittenCount: articles.filter((a) => a.isRewritten).length,
     refreshedAt: saved?.refreshedAt || null,
     errors,
+    rewriteErrors,
     items: articles,
   };
 }
