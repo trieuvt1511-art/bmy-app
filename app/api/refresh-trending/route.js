@@ -23,12 +23,22 @@
 // Returned JSON:
 //   { ok: true, items: [...], count, refreshedAt, engine }
 
+import crypto from "node:crypto";
 import {
   TRENDING_SOURCES,
   ITEMS_PER_SOURCE,
   MAX_TRENDING_ITEMS,
 } from "@/lib/trendingSources";
 import { saveTrending, getTrending } from "@/lib/trendingStore";
+
+// Stable, collision-free id từ source + URL.
+// Bug cũ: slice(0, 16) base64url của URL → mọi URL bắt đầu bằng "https://www."
+// đều có 16 ký tự đầu giống nhau ("aHR0cHM6Ly93d3cu") → collision giữa các bài
+// cùng host. SHA-1 tránh hoàn toàn collision này.
+function makeArticleId(source, url) {
+  const hash = crypto.createHash("sha1").update(url || "").digest("hex").slice(0, 12);
+  return `${source}-${hash}`;
+}
 
 // Incremental rewrite cap: mỗi lần cron chỉ rewrite bấy nhiêu item MỚI.
 // Groq free tier 8b-instant TPM ~6000, mỗi rewrite ~2500 token → 2 calls/run an toàn.
@@ -391,9 +401,7 @@ async function run({ dry = false } = {}) {
   const rewriteErrors = [];
   const newArticles = toRewrite.map((src, i) => {
     const rw = rewrites[i];
-    const id = `${src.source}-${Buffer.from(src.link)
-      .toString("base64url")
-      .slice(0, 16)}`;
+    const id = makeArticleId(src.source, src.link);
     const baseImage = src.image || "";
     const ok = rw && rw.ok;
     if (ok) engine = "groq";
@@ -428,12 +436,17 @@ async function run({ dry = false } = {}) {
 
   // 6. Merge với cache cũ: new publishable items + existing items,
   //    dedupe by sourceUrl, sort by publishedAt desc, cap MAX_TRENDING_ITEMS.
+  //    Đồng thời regenerate id cho mọi existing item dùng SHA-1 scheme mới
+  //    để fix bug collision cũ (mọi URL https://www... trùng id).
   const newPublishable = newArticles.filter((a) => a.isRewritten);
   const mergedMap = new Map();
   for (const it of newPublishable) mergedMap.set(it.sourceUrl, it);
   for (const it of existing) {
     const url = it.sourceUrl || it.url || "";
-    if (url && !mergedMap.has(url)) mergedMap.set(url, it);
+    if (url && !mergedMap.has(url)) {
+      // Force regenerate id với scheme mới (SHA-1) để migrate cache cũ.
+      mergedMap.set(url, { ...it, id: makeArticleId(it.source, url) });
+    }
   }
   const merged = [...mergedMap.values()]
     .sort((a, b) => {
