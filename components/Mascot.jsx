@@ -5,7 +5,13 @@ import { useState } from "react";
 /**
  * B'My mascot component.
  *
- * Save your mascot PNGs into /public/bmy/ with these exact filenames:
+ * Mỗi biến thể mascot nên có file PNG thật trong /public/bmy/ với
+ * các tên cố định dưới đây. Vì hiện tại các file PNG chưa được vẽ nên
+ * component sẽ IM LẶNG fallback sang emoji — không flash broken image,
+ * không phát network request cho file chưa tồn tại.
+ *
+ * Khi có file thật, chỉ cần thêm tên file vào AVAILABLE_MASCOTS bên dưới,
+ * component sẽ tự động nhận (không cần sửa gì thêm).
  *
  *   mascot-leek.png        — ngồi ôm bó tỏi tây, nón len đỏ, áo xanh
  *   mascot-herbs-blue.png  — ngồi ôm rau thơm, mũ lưỡi trai xanh, áo đỏ
@@ -15,8 +21,6 @@ import { useState } from "react";
  *   mascot-skate-blue.png  — ngồi xổm trên ván "Bánh mỳ Việt Nam", áo xanh
  *   mascot-skate-red.png   — ngồi xổm trên ván "Bánh mỳ Việt Nam", áo đỏ
  *   mascot-skate-jump.png  — bay trượt ván cầm túi, nón đỏ, áo vàng
- *
- * Nếu file chưa có, component tự fallback sang emoji tương ứng.
  */
 
 const EMOJI_FALLBACK = {
@@ -30,6 +34,12 @@ const EMOJI_FALLBACK = {
   "skate-jump":   "🤸",
 };
 
+// Whitelist những file PNG ĐÃ tồn tại trong /public/bmy/.
+// Rỗng → luôn dùng emoji fallback.
+const AVAILABLE_MASCOTS = new Set([
+  // "skate-jump", "leek", ...  ← bỏ comment khi có file thật
+]);
+
 export default function Mascot({
   name = "skate-jump",
   size = 160,
@@ -37,15 +47,16 @@ export default function Mascot({
   alt = "B'My mascot",
   floating = false,
 }) {
-  const [errored, setErrored] = useState(false);
-  const src = `/bmy/mascot-${name}.png`;
+  const hasPng = AVAILABLE_MASCOTS.has(name);
+  const [errored, setErrored] = useState(!hasPng);
 
   if (errored) {
     return (
       <div
-        className={`flex items-center justify-center ${className}`}
+        className={`flex items-center justify-center ${className} ${floating ? "animate-float" : ""}`}
         style={{ width: size, height: size, fontSize: size * 0.6 }}
         aria-label={alt}
+        role="img"
       >
         {EMOJI_FALLBACK[name] || "🥖"}
       </div>
@@ -55,7 +66,7 @@ export default function Mascot({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={`/bmy/mascot-${name}.png`}
       alt={alt}
       width={size}
       height={size}
