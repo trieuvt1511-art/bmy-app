@@ -115,14 +115,24 @@ function parseRss(xml) {
   return blocks;
 }
 
+// Real-looking browser User-Agent — một số feed (SeriousEats, Food & Wine)
+// chặn hard nếu UA chứa "bot" hoặc trông như script.
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
 async function fetchFeed(source) {
   try {
     const res = await fetch(source.url, {
       headers: {
-        "User-Agent": "BMyKitchenBot/1.0 (+https://bmy.es) Mozilla/5.0",
-        Accept: "application/rss+xml, application/xml, text/xml, */*",
+        "User-Agent": BROWSER_UA,
+        Accept:
+          "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        Referer: "https://www.google.com/",
       },
       cache: "no-store",
+      redirect: "follow",
       // Avoid hanging on slow feeds
       signal: AbortSignal.timeout(15000),
     });
@@ -130,18 +140,23 @@ async function fetchFeed(source) {
       return { source: source.id, error: `HTTP ${res.status}`, items: [] };
     }
     const xml = await res.text();
-    const items = parseRss(xml)
-      .filter((it) => it.title && it.link)
-      .slice(0, ITEMS_PER_SOURCE)
-      .map((it) => ({
-        ...it,
+    const parsed = parseRss(xml).filter((it) => it.title && it.link);
+    const items = parsed.slice(0, ITEMS_PER_SOURCE).map((it) => ({
+      ...it,
+      source: source.id,
+      sourceName: source.name,
+      sourceLang: source.lang,
+    }));
+    if (items.length === 0) {
+      return {
         source: source.id,
-        sourceName: source.name,
-        sourceLang: source.lang,
-      }));
+        error: `parsed 0 items (xml ${xml.length} bytes)`,
+        items: [],
+      };
+    }
     return { source: source.id, items };
   } catch (err) {
-    return { source: source.id, error: String(err), items: [] };
+    return { source: source.id, error: String(err?.message || err), items: [] };
   }
 }
 
