@@ -52,9 +52,10 @@ export const maxDuration = 60;
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-// llama-3.1-8b-instant: TPM ~30k (>2.5× so với 70b), output ~3× nhanh hơn.
-// Chất lượng tiếng Việt vẫn đủ cho summary ẩm thực ~150 từ.
-const GROQ_MODEL = "llama-3.1-8b-instant";
+// llama-3.3-70b-versatile: chất lượng tiếng Việt tốt hơn 8b rõ rệt, ít Vinglish.
+// TPM free tier ~6000. Với MAX_REWRITES_PER_RUN=2 × ~1250 token/call = ~2500 TPM/run,
+// vẫn fit thoải mái. Sequential (concurrency=1) nên không đụng rate limit.
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 // ---------------------------------------------------------------------------
 // RSS parsing — tiny hand-rolled parser, no external deps
@@ -196,7 +197,43 @@ async function fetchFeed(source) {
 //     cảm quan, liên hệ với văn hoá ẩm thực Việt Nam nếu có thể.
 //   - Phải tự nhiên đến mức đọc xong người Việt không nhận ra là dịch.
 
-const JOURNALIST_SYSTEM_PROMPT = `Bạn là phóng viên ẩm thực cao cấp của B'My Kitchen – một thương hiệu Bánh Mì và Cà Phê Việt Nam tại Madrid. Bạn viết tiếng Việt tự nhiên, có chiều sâu, có quan điểm, giống như biên tập viên của Esquire hoặc Luxuo Việt Nam. Bạn KHÔNG dịch máy. Bạn ĐỌC nguồn, NẮM ý chính, rồi VIẾT LẠI HOÀN TOÀN bằng giọng văn của mình, có thêm góc nhìn và liên hệ với ẩm thực Việt khi phù hợp. Luôn trả về JSON hợp lệ.`;
+const JOURNALIST_SYSTEM_PROMPT = `Bạn là biên tập viên ẩm thực tiếng Việt cao cấp, viết cho mục Đời Sống của VnExpress và mục Ẩm Thực của Luxuo Việt Nam. Bạn viết như một người Việt bản xứ đã sống nhiều năm ở châu Âu, am hiểu cả ẩm thực Việt lẫn ẩm thực quốc tế. Văn phong: điềm đạm, có chiều sâu, có quan điểm cá nhân, không màu mè, không clickbait.
+
+QUY TẮC TIẾNG VIỆT TUYỆT ĐỐI (quan trọng nhất):
+1. DỊCH 100% SANG TIẾNG VIỆT. Tuyệt đối KHÔNG để bất kỳ từ tiếng Anh, tiếng Pháp, hay tiếng Tây Ban Nha nào trong titleVi, leadVi, bodyVi. Mọi từ phải là tiếng Việt.
+2. CẤM các từ loanword sau đây — phải dịch ra tiếng Việt:
+   - "kitchen" → "căn bếp" / "gian bếp"
+   - "energie" / "energy" → "năng lượng"
+   - "salade" / "salad" → "gỏi" hoặc "rau trộn"
+   - "grocery" → "cửa hàng thực phẩm" / "tạp hoá"
+   - "creamy" → "béo ngậy" / "mềm mịn"
+   - "chef" → "đầu bếp"
+   - "dessert" → "món tráng miệng"
+   - "spicy" → "cay"
+   - "menu" → "thực đơn"
+   - "recipe" → "công thức"
+   - "trending" → "xu hướng"
+   - "guide" → "cẩm nang" / "hướng dẫn"
+   - "fresh" → "tươi"
+3. CẤM viết hoa kiểu tiếng Anh ("Món Ăn Mới Của Martha Stewart"). Tiếng Việt chỉ viết hoa CHỮ CÁI ĐẦU CÂU và TÊN RIÊNG. Ví dụ ĐÚNG: "Martha Stewart gợi ý món gì cho mùa xuân".
+4. Tên riêng nước ngoài (người, thương hiệu, địa danh) giữ nguyên. Ví dụ: Gabriela Cámara, Michelin Guide, Bon Appétit, Tokyo.
+5. Tên món ăn: nếu món Việt thì viết tiếng Việt (bánh mì, phở, gỏi cuốn). Nếu món nước ngoài đã quen thuộc thì giữ nguyên nhưng in nghiêng nếu dài (risotto, gimbap, tiramisu). Nếu lạ thì mở ngoặc giải thích ngắn.
+
+VĂN PHONG — viết như người viết báo Việt Nam thật:
+- Câu chủ động, ngắn gọn. Tránh "được", "bởi", "đối với" lặp lại.
+- Không dùng "rất", "cực kỳ", "vô cùng" trừ khi thực sự cần.
+- Không mở bài bằng câu hỏi tu từ rẻ tiền ("Bạn đã bao giờ...?").
+- Không kết bài bằng câu khẩu hiệu quảng cáo.
+- Có thể liên hệ với ẩm thực Việt khi phù hợp, nhưng đừng gượng ép.
+- Kể chi tiết cảm quan (mùi, vị, kết cấu) thay vì chỉ miêu tả trừu tượng.
+
+TIÊU ĐỀ (titleVi) — quan trọng:
+- 8 đến 14 chữ tiếng Việt. Không clickbait, không "bí kíp", "bí mật", không dấu chấm than.
+- Viết hoa theo chuẩn tiếng Việt (chỉ chữ đầu + tên riêng).
+- Ví dụ TỐT: "Gabriela Cámara và căn bếp Mexico giữa lòng New York"
+- Ví dụ XẤU: "Kitchen Của Đầu Bếp Gabriela Cámara - Một Cánh Cổng..."
+
+Luôn trả về JSON hợp lệ, không có text nào ngoài JSON.`;
 
 // Sanitize input để tránh các ký tự bẻ gãy prompt / JSON của Groq.
 // Thay smart-quotes → ASCII, bỏ zero-width & control chars.
@@ -228,35 +265,39 @@ async function groqRewriteOne(item, attempt = 1) {
     .filter(Boolean)
     .join("\n");
 
-  const userPrompt = `Dưới đây là tư liệu gốc từ một tạp chí ẩm thực quốc tế. Hãy đọc kỹ rồi VIẾT LẠI HOÀN TOÀN thành một bài báo tiếng Việt của B'My Kitchen.
+  const userPrompt = `Đọc kỹ tư liệu gốc bên dưới rồi VIẾT LẠI HOÀN TOÀN thành một bài báo tiếng Việt thuần. Nhớ các quy tắc tiếng Việt trong system prompt.
 
-QUY TẮC BẮT BUỘC:
-1. KHÔNG copy bất kỳ câu nào từ tư liệu gốc. Mọi câu phải do bạn viết ra.
-2. Tiêu đề (titleVi) 10-14 chữ tiếng Việt, có gu, không clickbait rẻ tiền.
-3. Đoạn mở (leadVi) 2-3 câu hook người đọc, nói được vì sao bài này đáng đọc.
-4. Nội dung (bodyVi) 400-600 chữ tiếng Việt, chia 2-4 phần với ## subheading markdown, có chi tiết cảm quan, có quan điểm, và nếu liên quan thì liên hệ với ẩm thực Việt Nam. KHÔNG lặp lại tiêu đề hay đoạn mở.
-5. Tags: 2-4 tag ngắn bằng tiếng Việt, ví dụ "Bánh mì", "Xu hướng", "Công thức", "Cà phê", "Văn hoá".
-6. Nếu nguồn viết về kỹ thuật nấu, hãy giải thích bằng ngôn ngữ dễ hiểu cho độc giả gia đình.
-7. Không mở đầu bằng "Theo tạp chí X…" hoặc "Bài viết nói rằng…". Viết như thể bạn tự khám phá ra câu chuyện này.
-8. Nếu tư liệu gốc quá ngắn (chỉ có tiêu đề), hãy DỰA VÀO chủ đề để viết ra một bài phân tích / bối cảnh văn hoá ẩm thực liên quan, vẫn đủ 400-600 chữ.
+YÊU CẦU CỤ THỂ:
+1. KHÔNG copy bất kỳ cụm từ nào từ tư liệu gốc.
+2. titleVi: 8-14 chữ tiếng Việt, viết hoa đúng chuẩn tiếng Việt (chỉ chữ đầu + tên riêng), không clickbait.
+3. leadVi: 2-3 câu tiếng Việt mở bài, giới thiệu chủ đề một cách tự nhiên. Không mở bằng "Theo...", "Bài viết...", hoặc câu hỏi tu từ.
+4. bodyVi: 400-600 chữ tiếng Việt, chia 2-4 phần bằng "## Tiêu đề phần" (markdown). Mỗi phần có luận điểm rõ ràng, chi tiết cảm quan, và nếu phù hợp thì liên hệ ẩm thực Việt. KHÔNG lặp lại titleVi hay leadVi.
+5. tags: 2-4 tag tiếng Việt ngắn (vd: "Bánh mì", "Xu hướng", "Công thức", "Cà phê", "Văn hoá", "Đầu bếp").
+6. Nếu nguồn rất ngắn (chỉ có tiêu đề), tự viết bài phân tích/bối cảnh văn hoá ẩm thực quanh chủ đề đó.
 
-ĐỊNH DẠNG OUTPUT (JSON duy nhất, không thêm text):
+KIỂM TRA TRƯỚC KHI TRẢ:
+- Đọc lại titleVi và bodyVi. Nếu còn sót bất kỳ từ tiếng Anh/Pháp/Tây Ban Nha nào (kitchen, salade, energie, creamy, chef, trending, fresh, guide, grocery...), DỊCH NGAY.
+- Nếu tiêu đề Viết Hoa Mọi Chữ (kiểu tiếng Anh), SỬA LẠI về chuẩn tiếng Việt.
+- Nếu có chữ "rất", "cực kỳ", "vô cùng" lặp lại, gỡ bớt.
+
+ĐỊNH DẠNG OUTPUT (JSON duy nhất, không có text ngoài JSON):
 {
-  "titleVi": "…",
-  "leadVi": "…",
-  "bodyVi": "## Phần 1\\n\\nNội dung…\\n\\n## Phần 2\\n\\nNội dung…",
-  "tags": ["…","…"]
+  "titleVi": "...",
+  "leadVi": "...",
+  "bodyVi": "## Phần 1\\n\\nNội dung...\\n\\n## Phần 2\\n\\nNội dung...",
+  "tags": ["...","..."]
 }
 
 TƯ LIỆU GỐC:
 ${rawContent}`;
 
-  // Fail-fast: 2 attempts max, backoff ngắn để tránh đụng maxDuration 60s trên Hobby.
-  // Với 8b-instant thường <5s/call nên 1 retry nhẹ vẫn thoải mái.
+  // Fail-fast: 2 attempts max, backoff phù hợp với maxDuration 60s Hobby.
+  // 70b-versatile chậm hơn 8b (~10-18s/call) nên 2 attempts + buffer vừa đủ.
   const maxAttempts = 2;
   const retry = async (stage, detail, is429 = false) => {
     if (attempt < maxAttempts) {
-      const waitMs = is429 ? 4000 : 1500;
+      // 429 TPM reset mỗi 60s, 12s là sweet spot giữa chờ reset và fit 60s maxDuration
+      const waitMs = is429 ? 12000 : 2000;
       await new Promise((r) => setTimeout(r, waitMs));
       return groqRewriteOne(item, attempt + 1);
     }
@@ -272,15 +313,17 @@ ${rawContent}`;
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
-        temperature: 0.6,
-        max_tokens: 900,
+        // Nhiệt độ thấp hơn để giảm sáng tạo lung tung + ép tuân thủ prompt nghiêm.
+        temperature: 0.4,
+        max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: JOURNALIST_SYSTEM_PROMPT },
           { role: "user", content: userPrompt },
         ],
       }),
-      signal: AbortSignal.timeout(18000),
+      // 70b chậm hơn 8b, cần buffer lớn hơn (trước 18s cho 8b)
+      signal: AbortSignal.timeout(28000),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -360,7 +403,7 @@ function authOk(req) {
   return h === `Bearer ${CRON_SECRET}`;
 }
 
-async function run({ dry = false } = {}) {
+async function run({ dry = false, rewriteAll: forceRewriteAll = false } = {}) {
   // 0. Load existing cache — dùng làm base + skip item đã rewrite trước đó.
   const existing = await getTrending();
   const existingByUrl = new Map(
@@ -388,9 +431,26 @@ async function run({ dry = false } = {}) {
     return db - da;
   });
 
-  // 3. Lọc ra các item CHƯA có trong cache (by link) — chỉ rewrite new items.
-  //    Cap ở MAX_REWRITES_PER_RUN để không vượt TPM 6000 free tier.
-  const freshRaw = raw.filter((r) => !existingByUrl.has(r.link));
+  // 3. Chọn items để rewrite.
+  //    Mặc định: chỉ rewrite items CHƯA có trong cache (incremental).
+  //    Chế độ force (?rewrite=all): ưu tiên rewrite items cũ nhất trong cache trước
+  //    (những item chưa có bodyVi mới theo prompt cải tiến). Dùng để migrate sau khi
+  //    cải prompt hoặc chuyển model.
+  let freshRaw;
+  if (forceRewriteAll) {
+    // Lấy items từ feed match với existing URLs (để re-rewrite cache hiện có),
+    // ưu tiên items cũ nhất trong cache (isRewritten=true nhưng prompt outdated).
+    // Fallback: cũng rewrite items chưa có trong cache nếu feed có bài mới.
+    const rawByUrl = new Map(raw.map((r) => [r.link, r]));
+    const staleExisting = existing
+      .filter((it) => it.sourceUrl && rawByUrl.has(it.sourceUrl))
+      .map((it) => rawByUrl.get(it.sourceUrl));
+    const newInFeed = raw.filter((r) => !existingByUrl.has(r.link));
+    freshRaw = [...staleExisting, ...newInFeed];
+  } else {
+    freshRaw = raw.filter((r) => !existingByUrl.has(r.link));
+  }
+  //    Cap ở MAX_REWRITES_PER_RUN để không vượt TPM free tier.
   const toRewrite = freshRaw.slice(0, MAX_REWRITES_PER_RUN);
 
   // 4. Rewrite sequential (concurrency=1) — an toàn tuyệt đối với TPM.
@@ -482,12 +542,15 @@ export async function GET(req) {
   if (!authOk(req)) return unauthorized();
   const url = new URL(req.url);
   const dry = url.searchParams.get("dry") === "1";
-  const result = await run({ dry });
+  const rewriteAll = url.searchParams.get("rewrite") === "all";
+  const result = await run({ dry, rewriteAll });
   return Response.json(result);
 }
 
 export async function POST(req) {
   if (!authOk(req)) return unauthorized();
-  const result = await run({ dry: false });
+  const url = new URL(req.url);
+  const rewriteAll = url.searchParams.get("rewrite") === "all";
+  const result = await run({ dry: false, rewriteAll });
   return Response.json(result);
 }
