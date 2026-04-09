@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Flame, BookOpen, Clock, ExternalLink, Rss, Sparkles } from "lucide-react";
+import { Flame, BookOpen, Clock, ArrowRight, Rss, Sparkles } from "lucide-react";
 import { BMY_BLOG_POSTS } from "@/lib/bmyBlog";
 
 function formatDate(d) {
@@ -84,59 +84,59 @@ export default function BlogPage() {
         ) : trending.length === 0 ? (
           <div className="p-6 bg-brand-50 border border-dashed border-brand-200 rounded-3xl text-center text-brand-900/60">
             <Sparkles className="inline mr-2" size={16} />
-            Danh sách trending còn trống. Cron hằng ngày sẽ tự pull bài mới từ
-            The Kitchn, Serious Eats, Bon Appétit, Food&amp;Wine, Eater, Cooky.vn
-            và Món Ngon Mỗi Ngày.
+            Danh sách trending còn trống. Cron hằng ngày sẽ tự pull bài mới và
+            viết lại bằng giọng của B'My Kitchen.
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {trending.map((t) => (
-              <a
-                key={t.id}
-                href={t.url}
-                target="_blank"
-                rel="noreferrer"
-                className="group bg-white border border-brand-100 rounded-3xl overflow-hidden card-hover block"
-              >
-                {t.image ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={t.image}
-                    alt={t.titleVi || t.title}
-                    className="w-full aspect-[16/9] object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full aspect-[16/9] bg-gradient-to-br from-brand-100 to-brand-200" />
-                )}
-                <div className="p-4">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1">
-                    {t.sourceName}
-                  </div>
-                  <h3 className="font-display font-black text-lg text-brand-900 group-hover:text-brand-600 line-clamp-2">
-                    {t.titleVi || t.title}
-                  </h3>
-                  {t.excerptVi && (
-                    <p className="text-sm text-brand-900/70 mt-2 line-clamp-3">
-                      {t.excerptVi}
-                    </p>
+            {trending.map((t) => {
+              const img = t.imageProxy || t.image || "";
+              return (
+                <Link
+                  key={t.id}
+                  href={`/blog/trending/${t.id}`}
+                  className="group bg-white border border-brand-100 rounded-3xl overflow-hidden card-hover block"
+                >
+                  {img ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={img}
+                      alt={t.titleVi || t.originalTitle || t.title}
+                      className="w-full aspect-[16/9] object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[16/9] bg-gradient-to-br from-brand-100 to-brand-200" />
                   )}
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {(t.tags || []).map((tag) => (
-                      <span
-                        key={tag}
-                        className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-600 text-[10px] font-bold"
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                  <div className="p-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1">
+                      {t.sourceName}
+                    </div>
+                    <h3 className="font-display font-black text-lg text-brand-900 group-hover:text-brand-600 line-clamp-2">
+                      {t.titleVi || t.originalTitle || t.title}
+                    </h3>
+                    {t.excerptVi && (
+                      <p className="text-sm text-brand-900/70 mt-2 line-clamp-3">
+                        {t.excerptVi}
+                      </p>
+                    )}
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {(t.tags || []).map((tag) => (
+                        <span
+                          key={tag}
+                          className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-600 text-[10px] font-bold"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-3 inline-flex items-center gap-1 text-xs text-brand-500 font-bold">
+                      Đọc bài viết <ArrowRight size={12} />
+                    </div>
                   </div>
-                  <div className="mt-3 inline-flex items-center gap-1 text-xs text-brand-500 font-bold">
-                    <ExternalLink size={12} /> Đọc bản gốc
-                  </div>
-                </div>
-              </a>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>
