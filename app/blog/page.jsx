@@ -16,6 +16,27 @@ function formatDate(d) {
   });
 }
 
+// Proxy external images qua /api/img-proxy để tránh hotlink block + CORS + lazy-load race
+function proxify(url) {
+  if (!url || !/^https?:\/\//.test(url)) return url;
+  try {
+    const u = btoa(url).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `/api/img-proxy?u=${u}`;
+  } catch {
+    return url;
+  }
+}
+
+// Gradient fallback khi ảnh hỏng — 6 cặp màu theo index
+const GRADIENTS = [
+  "from-orange-200 to-pink-200",
+  "from-amber-200 to-yellow-200",
+  "from-emerald-200 to-teal-200",
+  "from-rose-200 to-red-200",
+  "from-sky-200 to-indigo-200",
+  "from-lime-200 to-emerald-200",
+];
+
 export default function BlogPage() {
   const [trending, setTrending] = useState([]);
   const [refreshedAt, setRefreshedAt] = useState(null);
@@ -154,19 +175,28 @@ export default function BlogPage() {
           Bài viết của B'My Kitchen
         </h2>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {BMY_BLOG_POSTS.map((p) => (
+          {BMY_BLOG_POSTS.map((p, idx) => (
             <Link
               key={p.slug}
               href={`/blog/${p.slug}`}
               className="group bg-white border border-brand-100 rounded-3xl overflow-hidden card-hover"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={p.cover}
-                alt={p.title}
-                className="w-full aspect-[16/9] object-cover"
-                loading="lazy"
-              />
+              <div
+                className={`w-full aspect-[16/9] bg-gradient-to-br ${GRADIENTS[idx % GRADIENTS.length]} relative overflow-hidden`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={proxify(p.cover)}
+                  alt={p.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  loading="eager"
+                  decoding="async"
+                  onError={(e) => {
+                    // Nếu proxy fail, hide img để gradient background hiện ra
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              </div>
               <div className="p-5">
                 <div className="flex items-center gap-2 text-xs text-brand-900/50 mb-2">
                   <span>{formatDate(p.date)}</span>
