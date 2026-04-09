@@ -235,12 +235,12 @@ QUY TẮC BẮT BUỘC:
 TƯ LIỆU GỐC:
 ${rawContent}`;
 
-  const maxAttempts = 3;
+  // Fail-fast: 2 attempts max, backoff ngắn để tránh đụng maxDuration 60s trên Hobby.
+  // Với 8b-instant thường <5s/call nên 1 retry nhẹ vẫn thoải mái.
+  const maxAttempts = 2;
   const retry = async (stage, detail, is429 = false) => {
     if (attempt < maxAttempts) {
-      // Nếu bị 429 (rate limit) chờ lâu hơn (15s, 30s)
-      // Nếu lỗi khác chỉ backoff nhẹ (2s, 4s)
-      const waitMs = is429 ? 15000 * attempt : 2000 * attempt;
+      const waitMs = is429 ? 4000 : 1500;
       await new Promise((r) => setTimeout(r, waitMs));
       return groqRewriteOne(item, attempt + 1);
     }
@@ -264,7 +264,7 @@ ${rawContent}`;
           { role: "user", content: userPrompt },
         ],
       }),
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(18000),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
